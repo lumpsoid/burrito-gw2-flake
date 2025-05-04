@@ -207,7 +207,7 @@
           pname = "godot-headless";
           version = godotVersion;
           dontUnpack = true;
-          nativeBuildInputs = [pkgs.unzip pkgs.curl];
+          nativeBuildInputs = [pkgs.unzip pkgs.curl pkgs.patchelf];
           SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
           buildPhase = ''
@@ -219,6 +219,9 @@
           installPhase = ''
             mkdir -p $out/bin
             cp Godot_v${godotVersion}-stable_linux_headless.64 $out/bin/
+
+            # Patch the interpreter path
+            patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" $out/bin/Godot_v${godotVersion}-stable_linux_headless.64
           '';
         };
 
@@ -394,8 +397,8 @@
               freetype
 
               # Debug tools
+              glibc  # ldd
               file
-              ldd
               strace
 
               # Original build dependencies
