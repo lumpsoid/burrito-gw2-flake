@@ -52,13 +52,8 @@ nix run github:lumpsoid/burrito-gw2-flake#burrito-fhs
 Note: The application requires a compatible Guild Wars 2 installation to function properly.
 
 
-# Additional notes
+## Contributing
 
-Running `nix develop` (or using direnv) allows to run `burrito-gw2`, however it doesn't quite work in stand-alone because burrito invokes `./xml_converter`, a fix is to copy this file (found in burrito release) to the current folder.
+Running `nix develop` (or using direnv) allows to test `burrito-gw2` (built via FHS) and `burrito` (built via sources).
 
-It currently involves building a FHS env to satisfy burrito dependencies.
-
-I'll explore building from sources from within Nix.
-
-Also I'm planning to try and add some config options like the GW2 path so the .dll could be symlinked in it.
 
