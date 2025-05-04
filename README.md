@@ -1,33 +1,55 @@
-test attempt on creatin derivation on nix to provide wrapped burrito overlay for the guild wars 2
+# Burrito GW2 Flake
 
-for now it is a simple starting point in making derivations to provide packages on nix
+This repository contains an attempt to create a Nix flake for [Burrito](https://github.com/AsherGlick/Burrito), a Guild Wars 2 overlay application.
 
-I'll probably never get it to the end, because the person who pushed me to try this, dropped nixos, so, I don't have a tester.
+## Current State
 
-But I want to get it to the point, where I can run `burrito.x86_64` without getting `not found *.so` errors.
+The flake currently provides a working implementation using the `buildFHSUserEnv` approach. This implementation:
 
-```sh
-ldd ./burrito.x86_64
->	linux-vdso.so.1 (0x00007ffd3315b000)
->	libc.so.6 => /nix/store/5adwdl39g3k9a2j0qadvirnliv4r7pwd-glibc-2.39-52/lib/libc.so.6 (0x00007effafd83000)
->	/lib64/ld-linux-x86-64.so.2 => /nix/store/5adwdl39g3k9a2j0qadvirnliv4r7pwd-glibc-2.39-52/lib64/ld-linux-x86-64.so.2 (0x00007effaff7c000)
->	libXcursor.so.1 => not found
->	libXinerama.so.1 => not found
->	libXext.so.6 => not found
->	libXrandr.so.2 => not found
->	libXrender.so.1 => not found
->	libX11.so.6 => not found
->	libXi.so.6 => not found
->	libGL.so.1 => not found
->	libpthread.so.0 => /nix/store/5adwdl39g3k9a2j0qadvirnliv4r7pwd-glibc-2.39-52/lib/libpthread.so.0 (0x00007effafd7c000)
->	libdl.so.2 => /nix/store/5adwdl39g3k9a2j0qadvirnliv4r7pwd-glibc-2.39-52/lib/libdl.so.2 (0x00007effafd75000)
->	libm.so.6 => /nix/store/5adwdl39g3k9a2j0qadvirnliv4r7pwd-glibc-2.39-52/lib/libm.so.6 (0x00007effafc8f000)
+- Successfully runs the Burrito application in a FHS-compatible environment
+- Uses a wrapper script to ensure the application runs from the correct directory
+- Handles the required dependencies and runtime environment
+
+## Known Issues and Limitations
+
+### Why We Can't Use `mkDerivation` on Release Files
+
+We've attempted to use `mkDerivation` with the pre-built release files, but encountered several obstacles:
+
+1. **Embedded PCK in Binary**: Burrito is built with Godot, which embeds the `.pck` file (containing project data) directly in the binary. Standard ELF patching methods like `patchelf` or `autoPatchelfHook` corrupt this embedded data, resulting in errors:
+```
+Error: Couldn't load project data at path ".". Is the .pck file missing?
 ```
 
-to solve this, as I understand it, I need to use `makeWrapper` in `nativeBuildInputs`, and then provide all packages in `pkgs.lib.makeBinPath (with pkgs; [ xorg.libX11 ])`
+2. **Dynamic Linking**: The pre-built binary requires specific dynamic linking to work on NixOS:
+```
+Could not start dynamically linked executable: ./burrito.x86_64
+NixOS cannot run dynamically linked executables intended for generic
+linux environments out of the box.
+```
 
-burrito repo is now working on automated github workflows to create a CI system, so I can have a sneak peek at the build process when they will finish it, because now I can't find any clues from the repo inself. I don't know how godot projects works in this regard.
+3. **Runtime Path Issues**: Burrito requires access to the `xml_converter` executable in the same directory during runtime. Managing this path relationship in a Nix store directory structure proves challenging.
 
+## Future Work
+
+Potential improvements to explore:
+
+1. **Build from Source**: Creating a proper derivation by building Burrito from source code rather than using pre-built binaries. This would allow for proper integration with the Nix ecosystem.
+
+2. **DLL Integration**: Adding configuration options for the GW2 Wine path to properly symlink the burrito-link DLL.
+
+## Usage
+
+To use the Burrito overlay:
+
+```bash
+# Run directly
+nix run github:lumpsoid/burrito-gw2-flake#burrito-fhs
+
+# Add to your flake inputs and use as a package
+```
+
+Note: The application requires a compatible Guild Wars 2 installation to function properly.
 
 
 # Additional notes
