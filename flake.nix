@@ -38,8 +38,9 @@
         };
 
         # Rust toolchain for burrito-fg and taco_parser
+        rustTarget = "x86_64-unknown-linux-gnu";
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          targets = ["x86_64-unknown-linux-gnu"];
+          targets = [rustTarget];
         };
 
         # Build dependencies
@@ -90,10 +91,13 @@
           sourceRoot = "source/burrito_converter";
 
           # Add specific CMake flags to help find Protobuf
+          # would be passed to cmake
+          # https://discourse.nixos.org/t/cmakeflags-and-spaces-in-option-values/20170
           cmakeFlags = [
             "-DProtobuf_INCLUDE_DIR=${pkgs.protobuf}/include"
             "-DProtobuf_LIBRARY=${pkgs.protobuf}/lib/libprotobuf.so"
             "-DProtobuf_PROTOC_EXECUTABLE=${pkgs.protobuf}/bin/protoc"
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
           ];
 
           # dependencies at build time
@@ -103,14 +107,12 @@
             pkg-config
             protobuf
             gtest
-            python3Packages.pip # probably not needed
+            python3Packages.pip
             # cpplint  # failing with internal test errors
           ];
 
           buildPhase = ''
-            mkdir -p build
-            cd build
-            cmake ..
+            cmake .
             make -j $NIX_BUILD_CORES
           '';
 
@@ -122,45 +124,48 @@
         };
 
         # Build the burrito_link component
-        burrito_link = stdenv.mkDerivation {
-          pname = "burrito_link";
-          version = "1.0.0";
-          inherit src;
+        burrito_link = let
+          # Create a gcc wrapper that uses win32 threads instead of posix
+          # https://discourse.nixos.org/t/statically-linked-mingw-binaries/38395/7
+          gcc = pkgs.pkgsCross.mingwW64.buildPackages.wrapCC (pkgs.pkgsCross.mingwW64.buildPackages.gcc-unwrapped.override {
+            threadsCross = {
+              model = "win32";
+              package = null;
+            };
+          });
 
-          sourceRoot = "source/burrito_link";
+          # Create a new stdenv with our custom gcc
+          customStdenv = pkgs.overrideCC pkgs.pkgsCross.mingwW64.stdenv gcc;
+        in
+          customStdenv.mkDerivation
+          {
+            pname = "burrito_link";
+            version = "1.0.0";
+            inherit src;
 
-          cmakeFlags = [
-            # Configure CMake to use the MinGW cross compiler
-            "-DCMAKE_SYSTEM_NAME=Windows"
-            "-DCMAKE_C_COMPILER=${pkgs.pkgsCross.mingwW64.buildPackages.gcc}/bin/x86_64-w64-mingw32-gcc"
-            "-DCMAKE_CXX_COMPILER=${pkgs.pkgsCross.mingwW64.buildPackages.gcc}/bin/x86_64-w64-mingw32-g++"
-            # Switch to win32 thread model to avoid mcfgthreads dependency
-            "-DCMAKE_C_FLAGS=-mthreads"
-            "-DCMAKE_CXX_FLAGS=-mthreads"
-          ];
+            sourceRoot = "source/burrito_link";
 
-          # dependencies at build time
-          nativeBuildInputs = with pkgs; [
-            cmake
+            nativeBuildInputs = with pkgs; [
+              cmake
+            ];
 
-            # For Windows builds - replace mingw-w64 with cross compiler
-            pkgsCross.mingwW64.buildPackages.gcc
-          ];
+            buildPhase = ''
+              cmake ..
+              make -j $NIX_BUILD_CORES
+            '';
 
-          buildPhase = ''
-            mkdir -p build
-            cd build
-            cmake ..
-            make -j $NIX_BUILD_CORES
-          '';
+            installPhase = ''
+              mkdir -p $out/bin
 
-          installPhase = ''
-            mkdir -p $out/bin
-            cp burrito_link.exe $out/bin/
-            cp d3d11.dll $out/bin/
-            cp arcdps_burrito_link.dll $out/bin/
-          '';
-        };
+              # for some reason it named as burrito_link.exe.exe
+              cp burrito_link.exe.exe $out/bin/burrito_link.exe
+
+              cp d3d11.dll $out/bin/
+
+              # https://github.com/AsherGlick/Burrito/blob/0aac9e4ad612665396158c00f288c6644ea20b4b/.github/workflows/main.yml#L122
+              cp d3d11.dll $out/bin/arcdps_burrito_link.dll
+            '';
+          };
 
         # Build the burrito-fg component
         burrito_fg = pkgs.rustPlatform.buildRustPackage {
@@ -170,14 +175,23 @@
 
           sourceRoot = "source/burrito-fg";
 
-          cargoHash = ""; # Replace with the correct hash
+          cargoHash = "sha256-2+xx/OL1Xuxy15IxVQUpo4f/PNVkwL7i/gdWe5FyRLw=";
 
           # dependencies at build time
-          nativeBuildInputs = [rustToolchain];
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.clang
+            pkgs.llvmPackages.libclang
+          ];
+
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+
+          # Skip running tests
+          doCheck = false;
 
           postInstall = ''
             mkdir -p $out/lib
-            cp target/release/libburrito_fg.so $out/lib/
+            cp target/${rustTarget}/release/libburrito_fg.so $out/lib/
           '';
         };
 
@@ -189,14 +203,20 @@
 
           sourceRoot = "source/taco_parser";
 
-          cargoHash = ""; # Replace with the correct hash
+          cargoHash = "sha256-p/kX1iuMIbCj5OSKG5PMZqhayvqIAAARy8De/am4/3Q=";
 
           # dependencies at build time
-          nativeBuildInputs = [rustToolchain];
+          nativeBuildInputs = [
+            rustToolchain
+            pkgs.clang
+            pkgs.llvmPackages.libclang
+          ];
+
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
           postInstall = ''
             mkdir -p $out/lib
-            cp target/release/libgw2_taco_parser.so $out/lib/
+            cp target/${rustTarget}/release/libgw2_taco_parser.so $out/lib/
           '';
         };
 
@@ -253,11 +273,6 @@
           nativeBuildInputs = with pkgs; [
             unzip
             curl
-
-            # Debugging tools
-            file
-            ldd
-            strace
           ];
 
           # for curl
@@ -267,39 +282,37 @@
           SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
           buildPhase = ''
-                # Create fake GDNative files structure
-                mkdir -p burrito-fg/target/release/
-                touch burrito-fg/target/release/libburrito_fg.so
-                mkdir -p taco_parser/target/release/
-                touch taco_parser/target/release/libgw2_taco_parser.so
+            # Create GDNative files structure
+            mkdir -p burrito-fg/target/release/
+            touch burrito-fg/target/release/libburrito_fg.so
+            mkdir -p taco_parser/target/release/
+            touch taco_parser/target/release/libgw2_taco_parser.so
 
-                # Use pre-downloaded Godot
-                mkdir -p build
-                cp ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64 .
+            # Create project-local config directory to avoid homeless-shelter issue
+            mkdir -p .config/godot/projects
 
-                # Create local templates directory
-                mkdir -p .local/share/godot/templates/${godotVersion}.stable/
-                cp -r ${godot_templates}/templates/${godotVersion}.stable/* .local/share/godot/templates/${godotVersion}.stable/
+            # Use pre-downloaded Godot
+            mkdir -p build
+            cp ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64 .
 
-                # Set XDG_DATA_HOME
-                export XDG_DATA_HOME="$PWD/.local"
+            # Create proper template directory structure
+            # Note the different path (.local/share/godot/templates vs .local/godot/templates)
+            mkdir -p .local/share/godot/templates/${godotVersion}.stable/
+            cp -r ${godot_templates}/templates/${godotVersion}.stable/* .local/share/godot/templates/${godotVersion}.stable/
 
-                # Debug Godot binary
-                echo "File information:"
-                file ./Godot_v${godotVersion}-stable_linux_headless.64
+            # Create symbolic links for the expected template paths
+            mkdir -p .local/godot/templates/${godotVersion}.stable/
+            ln -s $PWD/.local/share/godot/templates/${godotVersion}.stable/linux_x11_64_debug .local/godot/templates/${godotVersion}.stable/
+            ln -s $PWD/.local/share/godot/templates/${godotVersion}.stable/linux_x11_64_release .local/godot/templates/${godotVersion}.stable/
 
-                echo "Library dependencies:"
-                ldd ./Godot_v${godotVersion}-stable_linux_headless.64 || echo "ldd failed"
+            # Set up environment variables
+            export HOME=$PWD
+            export XDG_CONFIG_HOME="$PWD/.config"
+            export XDG_DATA_HOME="$PWD/.local/share"
 
-                echo "Trying to run with strace to see missing dependencies:"
-                strace -f ./Godot_v${godotVersion}-stable_linux_headless.64 --version || echo "Strace failed"
-
-            # ERROR NEEDED TO BE ADDRESSED
-                        # ./Godot_v3.3.2-stable_linux_headless.64: cannot execute: required file not found
-
-                # Try export command
-                echo "Attempting to export project:"
-                ./Godot_v${godotVersion}-stable_linux_headless.64 --export "Linux/X11" build/burrito.x86_64 || echo "Export failed"
+            # Try export command
+            echo "Attempting to export project:"
+            ./Godot_v${godotVersion}-stable_linux_headless.64 --path . --export-debug "Linux/X11" build/burrito.x86_64 || ./Godot_v${godotVersion}-stable_linux_headless.64 --path . --export "Linux/X11" build/burrito.x86_64
           '';
 
           installPhase = ''
@@ -307,12 +320,10 @@
             if [ -f build/burrito.x86_64 ]; then
               cp build/burrito.x86_64 $out/bin/
             else
-              echo "Build failed, creating placeholder for debugging"
-              touch $out/bin/burrito.x86_64
+              echo "Export failed: burrito.x86_64 not found"
+              exit 1
             fi
           '';
-          # Don't fail the build so we can see debug output
-          dontFixup = true;
         };
 
         # The final package combining all components
@@ -397,7 +408,7 @@
               freetype
 
               # Debug tools
-              glibc  # ldd
+              glibc # ldd
               file
               strace
 
