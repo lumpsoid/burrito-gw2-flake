@@ -243,21 +243,27 @@
           '';
         };
 
-        godot_templates = stdenv.mkDerivation {
+        godot_templates = stdenv.mkDerivation rec {
           pname = "godot-templates";
           version = godotVersion;
-          dontUnpack = true;
-          nativeBuildInputs = [pkgs.unzip pkgs.curl];
-          SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
-          buildPhase = ''
-            curl -Lo templates.tpz https://github.com/godotengine/godot/releases/download/${godotVersion}-stable/Godot_v${godotVersion}-stable_export_templates.tpz
-            unzip templates.tpz
+          src = pkgs.fetchurl {
+            url = "https://github.com/godotengine/godot/releases/download/${version}-stable/Godot_v${version}-stable_export_templates.tpz";
+            sha256 = "sha256-PJvA6GljnAl6gr7ogcuQIqMK9OKZKNwbeEIL7IsithI=";
+          };
+          
+          dontConfigure = true;
+          dontBuild = true;
+
+          nativeBuildInputs = [pkgs.unzip];
+
+          unpackPhase = ''
+            unzip $src
           '';
 
           installPhase = ''
-            mkdir -p $out/templates/${godotVersion}.stable/
-            mv templates/* $out/templates/${godotVersion}.stable/
+            mkdir -p $out/templates
+            mv templates/* $out/templates
           '';
         };
 
@@ -269,19 +275,11 @@
 
           # dependencies at build time
           nativeBuildInputs = with pkgs; [
-            unzip
-            curl
             gnused
           ];
 
-          # for curl
-          # because of
-          # curl: (77) error setting certificate file: /no-cert-file.crt
-          # https://github.com/NixOS/nixpkgs/issues/13744#issuecomment-198779626
-          SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
-
           buildPhase = ''
-            # Create GDNative files structure
+            # Fake GDNative files structure
             mkdir -p burrito-fg/target/release/
             touch burrito-fg/target/release/libburrito_fg.so
             mkdir -p taco_parser/target/release/
@@ -290,18 +288,13 @@
             # Create project-local config directory to avoid homeless-shelter issue
             mkdir -p .config/godot/projects
 
-            # Use pre-downloaded Godot
             mkdir -p build
-            cp ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64 .
 
             # Create proper template directory structure
-            mkdir -p .local/share/godot/templates/${godotVersion}.stable/
-            cp -r ${godot_templates}/templates/${godotVersion}.stable/* .local/share/godot/templates/${godotVersion}.stable/
+            mkdir -p .local/share/godot/templates/
 
             # Create symbolic links for the expected template paths
-            mkdir -p .local/godot/templates/${godotVersion}.stable/
-            ln -s $PWD/.local/share/godot/templates/${godotVersion}.stable/linux_x11_64_debug .local/godot/templates/${godotVersion}.stable/
-            ln -s $PWD/.local/share/godot/templates/${godotVersion}.stable/linux_x11_64_release .local/godot/templates/${godotVersion}.stable/
+            ln -s ${godot_templates}/templates .local/share/godot/templates/${godotVersion}.stable
 
             # Set up environment variables
             export HOME=$PWD
@@ -311,7 +304,8 @@
             # Modify export_presets.cfg to set embed_pck=false
             sed -i 's/binary_format\/embed_pck=true/binary_format\/embed_pck=false/g' export_presets.cfg
 
-            ./Godot_v${godotVersion}-stable_linux_headless.64 --export "Linux/X11"
+            
+            ${godot_headless}/bin/godot-headless --export "Linux/X11"
           '';
 
           installPhase = ''
@@ -333,13 +327,12 @@
           nativeBuildInputs = [pkgs.makeWrapper];
 
           installPhase = ''
-            mkdir -p $out/bin $out/lib $out/share/burrito
+            mkdir -p $out/bin $out/lib $out/share/burrito_link
 
             # Copy burrito_converter
             cp ${burrito_converter}/bin/burrito_converter $out/bin/
 
             # Copy burrito_link files
-            mkdir -p $out/share/burrito_link
             cp ${burrito_link}/bin/burrito_link.exe $out/share/burrito_link/
             cp ${burrito_link}/bin/d3d11.dll $out/share/burrito_link/
             cp ${burrito_link}/bin/arcdps_burrito_link.dll $out/share/burrito_link/
@@ -351,16 +344,7 @@
             # Check for PCK file and copy if exists
             cp ${burrito_ui}/bin/burrito.pck $out/bin/burrito.pck
 
-            # Copy libraries to the expected locations for GDNative
-            mkdir -p $out/share/burrito/burrito-fg/target/release/
-            cp ${burrito_fg}/lib/libburrito_fg.so $out/share/burrito/burrito-fg/target/release/
-            chmod +w $out/share/burrito/burrito-fg/target/release/libburrito_fg.so
-
-            mkdir -p $out/share/burrito/taco_parser/target/release/
-            cp ${taco_parser}/lib/libgw2_taco_parser.so $out/share/burrito/taco_parser/target/release/
-            chmod +w $out/share/burrito/taco_parser/target/release/libgw2_taco_parser.so
-
-            # Also copy to lib directory for general access
+            # Copy burrito rust libs
             cp ${burrito_fg}/lib/libburrito_fg.so $out/lib/
             chmod +w $out/lib/libburrito_fg.so
 
@@ -373,10 +357,6 @@
             # Patch the executable to set the correct interpreter and RPATH
             patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" $out/bin/burrito.x86_64
             patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/bin/burrito.x86_64
-
-            # Additionally patch the GDNative libraries
-            patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/lib/libburrito_fg.so
-            patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/lib/libgw2_taco_parser.so
 
             # Create a wrapper script with proper working directory
             makeWrapper $out/bin/burrito.x86_64 $out/bin/burrito \
