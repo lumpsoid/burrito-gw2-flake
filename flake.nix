@@ -273,6 +273,7 @@
           nativeBuildInputs = with pkgs; [
             unzip
             curl
+            gnused
           ];
 
           # for curl
@@ -296,7 +297,6 @@
             cp ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64 .
 
             # Create proper template directory structure
-            # Note the different path (.local/share/godot/templates vs .local/godot/templates)
             mkdir -p .local/share/godot/templates/${godotVersion}.stable/
             cp -r ${godot_templates}/templates/${godotVersion}.stable/* .local/share/godot/templates/${godotVersion}.stable/
 
@@ -310,19 +310,16 @@
             export XDG_CONFIG_HOME="$PWD/.config"
             export XDG_DATA_HOME="$PWD/.local/share"
 
-            # Try export command
-            echo "Attempting to export project:"
-            ./Godot_v${godotVersion}-stable_linux_headless.64 --path . --export-debug "Linux/X11" build/burrito.x86_64 || ./Godot_v${godotVersion}-stable_linux_headless.64 --path . --export "Linux/X11" build/burrito.x86_64
+            # Modify export_presets.cfg to set embed_pck=false
+            sed -i 's/binary_format\/embed_pck=true/binary_format\/embed_pck=false/g' export_presets.cfg
+
+            ./Godot_v${godotVersion}-stable_linux_headless.64 --export "Linux/X11"
           '';
 
           installPhase = ''
             mkdir -p $out/bin
-            if [ -f build/burrito.x86_64 ]; then
-              cp build/burrito.x86_64 $out/bin/
-            else
-              echo "Export failed: burrito.x86_64 not found"
-              exit 1
-            fi
+            cp build/burrito.x86_64 $out/bin/
+            cp build/burrito.pck $out/bin/
           '';
         };
 
@@ -333,32 +330,59 @@
 
           phases = ["installPhase"];
 
-          installPhase = ''
-            mkdir -p $out/bin $out/lib
+          # at this point don't really sure
+          # that this is needed
+          nativeBuildInputs = [pkgs.makeWrapper];
 
+          installPhase = ''
+            mkdir -p $out/bin $out/lib $out/share/burrito
+    
             # Copy burrito_converter
             cp ${burrito_converter}/bin/burrito_converter $out/bin/
-
+    
             # Copy burrito_link files
             mkdir -p $out/share/burrito_link
             cp ${burrito_link}/bin/burrito_link.exe $out/share/burrito_link/
             cp ${burrito_link}/bin/d3d11.dll $out/share/burrito_link/
             cp ${burrito_link}/bin/arcdps_burrito_link.dll $out/share/burrito_link/
-
+    
             # Copy burrito UI
             cp ${burrito_ui}/bin/burrito.x86_64 $out/bin/
-
-            # Copy libraries
+            chmod +w $out/bin/burrito.x86_64
+    
+            # Check for PCK file and copy if exists
+            cp ${burrito_ui}/bin/burrito.pck $out/bin/burrito.pck
+    
+            # Copy libraries to the expected locations for GDNative
+            mkdir -p $out/share/burrito/burrito-fg/target/release/
+            cp ${burrito_fg}/lib/libburrito_fg.so $out/share/burrito/burrito-fg/target/release/
+            chmod +w $out/share/burrito/burrito-fg/target/release/libburrito_fg.so
+    
+            mkdir -p $out/share/burrito/taco_parser/target/release/
+            cp ${taco_parser}/lib/libgw2_taco_parser.so $out/share/burrito/taco_parser/target/release/
+            chmod +w $out/share/burrito/taco_parser/target/release/libgw2_taco_parser.so
+    
+            # Also copy to lib directory for general access
             cp ${burrito_fg}/lib/libburrito_fg.so $out/lib/
-            cp ${taco_parser}/lib/libgw2_taco_parser.so $out/lib/
+            chmod +w $out/lib/libburrito_fg.so
 
-            # Create wrapper script
-            cat > $out/bin/burrito <<EOF
-            #!/bin/sh
-            cd $out/bin
-            exec ./burrito.x86_64
-            EOF
-            chmod +x $out/bin/burrito
+            cp ${taco_parser}/lib/libgw2_taco_parser.so $out/lib/
+            chmod +w $out/lib/libgw2_taco_parser.so
+
+            # Create runtime dependencies string
+            RUNTIME_DEPS="${lib.makeLibraryPath runtimeDeps}"
+
+            # Patch the executable to set the correct interpreter and RPATH
+            patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" $out/bin/burrito.x86_64
+            patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/bin/burrito.x86_64
+
+            # Additionally patch the GDNative libraries
+            patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/lib/libburrito_fg.so
+            patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/lib/libgw2_taco_parser.so
+    
+            # Create a wrapper script with proper working directory
+            makeWrapper $out/bin/burrito.x86_64 $out/bin/burrito \
+              --chdir $out/bin
           '';
 
           meta = {
@@ -415,14 +439,16 @@
               # Original build dependencies
               unzip
               curl
+
+              burrito
             ];
 
             shellHook = ''
               echo "Debugging environment for Godot headless"
               echo "To debug the Godot binary, run:"
-              echo "ldd ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64"
-              echo "file ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64"
-              echo "strace ${godot_headless}/bin/Godot_v${godotVersion}-stable_linux_headless.64 --version"
+              echo "ldd ${burrito}/bin/burrito"
+              echo "file ${burrito}/bin/burrito"
+              echo "strace ${burrito}/bin/burrito"
             '';
           };
         };
