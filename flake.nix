@@ -57,14 +57,10 @@
           (python3.withPackages (ps:
             with ps; [
               pip
-              venv
             ]))
 
           # For Godot
           unzip
-
-          # For Windows builds
-          mingw-w64
         ];
 
         # Runtime dependencies
