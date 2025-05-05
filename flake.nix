@@ -219,25 +219,27 @@
         # Godot version from the workflow
         godotVersion = "3.3.2";
 
-        godot_headless = stdenv.mkDerivation {
+        godot_headless = stdenv.mkDerivation rec {
           pname = "godot-headless";
           version = godotVersion;
-          dontUnpack = true;
-          nativeBuildInputs = [pkgs.unzip pkgs.curl pkgs.patchelf];
-          SSL_CERT_FILE = "/etc/ssl/certs/ca-bundle.crt";
 
-          buildPhase = ''
-            curl -Lo godot.zip https://github.com/godotengine/godot/releases/download/${godotVersion}-stable/Godot_v${godotVersion}-stable_linux_headless.64.zip
-            unzip godot.zip
-            chmod +x Godot_v${godotVersion}-stable_linux_headless.64
-          '';
+          src = pkgs.fetchzip {
+            url = "https://github.com/godotengine/godot/releases/download/${version}-stable/Godot_v${version}-stable_linux_headless.64.zip";
+            sha256 = "sha256-3RXKzYTydcg1RNKdY2E3BfnM1EPxGC0RzwFOvWfZ9xs=";
+            stripRoot = false;
+          };
+
+          nativeBuildInputs = [pkgs.patchelf];
+
+          dontConfigure = true;
+          dontBuild = true;
 
           installPhase = ''
             mkdir -p $out/bin
-            cp Godot_v${godotVersion}-stable_linux_headless.64 $out/bin/
+            cp Godot_v${version}-stable_linux_headless.64 $out/bin/${pname}
 
             # Patch the interpreter path
-            patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" $out/bin/Godot_v${godotVersion}-stable_linux_headless.64
+            patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" $out/bin/${pname}
           '';
         };
 
@@ -332,32 +334,32 @@
 
           installPhase = ''
             mkdir -p $out/bin $out/lib $out/share/burrito
-    
+
             # Copy burrito_converter
             cp ${burrito_converter}/bin/burrito_converter $out/bin/
-    
+
             # Copy burrito_link files
             mkdir -p $out/share/burrito_link
             cp ${burrito_link}/bin/burrito_link.exe $out/share/burrito_link/
             cp ${burrito_link}/bin/d3d11.dll $out/share/burrito_link/
             cp ${burrito_link}/bin/arcdps_burrito_link.dll $out/share/burrito_link/
-    
+
             # Copy burrito UI
             cp ${burrito_ui}/bin/burrito.x86_64 $out/bin/
             chmod +w $out/bin/burrito.x86_64
-    
+
             # Check for PCK file and copy if exists
             cp ${burrito_ui}/bin/burrito.pck $out/bin/burrito.pck
-    
+
             # Copy libraries to the expected locations for GDNative
             mkdir -p $out/share/burrito/burrito-fg/target/release/
             cp ${burrito_fg}/lib/libburrito_fg.so $out/share/burrito/burrito-fg/target/release/
             chmod +w $out/share/burrito/burrito-fg/target/release/libburrito_fg.so
-    
+
             mkdir -p $out/share/burrito/taco_parser/target/release/
             cp ${taco_parser}/lib/libgw2_taco_parser.so $out/share/burrito/taco_parser/target/release/
             chmod +w $out/share/burrito/taco_parser/target/release/libgw2_taco_parser.so
-    
+
             # Also copy to lib directory for general access
             cp ${burrito_fg}/lib/libburrito_fg.so $out/lib/
             chmod +w $out/lib/libburrito_fg.so
@@ -375,7 +377,7 @@
             # Additionally patch the GDNative libraries
             patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/lib/libburrito_fg.so
             patchelf --set-rpath "$RUNTIME_DEPS:$out/lib" $out/lib/libgw2_taco_parser.so
-    
+
             # Create a wrapper script with proper working directory
             makeWrapper $out/bin/burrito.x86_64 $out/bin/burrito \
               --chdir $out/bin
